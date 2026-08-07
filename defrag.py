@@ -39,7 +39,7 @@ class DefragVisualizer:
         self.rows = (self.height - UI_HEIGHT) // CELL_SIZE 
         self.total_cells = self.cols * self.rows
         
-        self.font = pygame.font.SysFont("consolas", 18, bold=True)
+        self.font = pygame.font.SysFont("consolas", 15, bold=True)
         self.linear_grid = []
         self.clock = pygame.time.Clock()
         
@@ -48,7 +48,7 @@ class DefragVisualizer:
         self.speed_text = str(self.delay_ms)
         self.input_speed_active = False
         
-        self.frag_percent = 35 
+        self.frag_percent = 20 
         self.frag_text = str(self.frag_percent)
         self.input_frag_active = False
         
@@ -58,6 +58,10 @@ class DefragVisualizer:
         self.write_index = 0
         self.read_index = 0
         self.last_action_time = 0
+        
+        # Screensaver State Variables
+        self.done_time = 0
+        self.restart_delay_ms = 60000  # 60,000 milliseconds = 1 minute
         
         self.active_reads = []
         self.active_writes = []
@@ -78,6 +82,7 @@ class DefragVisualizer:
         self.write_index = 0
         self.read_index = 0
         self.last_action_time = 0
+        self.done_time = 0  # Reset the completion timer
         self.active_reads = []
         self.active_writes = []
         
@@ -91,7 +96,7 @@ class DefragVisualizer:
             elif state_choice == COLOR_EMPTY:
                 chunk_size = random.randint(5, 80)   
             else:
-                chunk_size = random.randint(1, 50)   
+                chunk_size = random.randint(1, 10)   
                 
             self.linear_grid.extend([state_choice] * chunk_size)
             
@@ -106,72 +111,78 @@ class DefragVisualizer:
                 self.linear_grid[i] = COLOR_SYSTEM
 
     def defrag_step(self):
-        if not self.is_defragging or self.state == "DONE":
+        if not self.is_defragging:
             return
 
         current_time = pygame.time.get_ticks()
-        
+
+        # --- THE SCREENSAVER RESTART TRIGGER ---
+        if self.state == "DONE":
+            # Check if our resting minute is up
+            if current_time - self.done_time >= self.restart_delay_ms:
+                self.generate_seed()
+                self.is_defragging = True # Force it to immediately start running again
+            return
+
+        # Normal operation delay
         if current_time - self.last_action_time < self.delay_ms:
             return
 
+        # Record the state *before* we process logic so we can catch when it changes to DONE
+        prev_state = self.state
+
         if self.state == "FIND_TARGETS":
-            # 1. Find the next spot that needs fixing (Empty gap OR Fragmented data)
             while self.write_index < self.total_cells and self.linear_grid[self.write_index] in [COLOR_UNFRAGMENTED, COLOR_SYSTEM]:
                 self.write_index += 1
                 
             if self.write_index >= self.total_cells:
                 self.state = "DONE"
-                return
-
-            # BRANCH A: IN-PLACE HEALING
-            # If the spot we stopped on is fragmented data, we fix it where it sits.
-            if self.linear_grid[self.write_index] == COLOR_FRAGMENTED:
-                chunk_len = random.randint(1, 10)
-                self.active_reads = []
-                self.active_writes = []
                 
-                temp_idx = self.write_index
-                for _ in range(chunk_len):
-                    if temp_idx < self.total_cells and self.linear_grid[temp_idx] == COLOR_FRAGMENTED:
-                        self.active_reads.append(temp_idx)
-                        self.active_writes.append(temp_idx) # Write exactly where we read
-                        temp_idx += 1
-                    else:
-                        break
+            else:
+                if self.linear_grid[self.write_index] == COLOR_FRAGMENTED:
+                    chunk_len = random.randint(1, 10)
+                    self.active_reads = []
+                    self.active_writes = []
+                    
+                    temp_idx = self.write_index
+                    for _ in range(chunk_len):
+                        if temp_idx < self.total_cells and self.linear_grid[temp_idx] == COLOR_FRAGMENTED:
+                            self.active_reads.append(temp_idx)
+                            self.active_writes.append(temp_idx) 
+                            temp_idx += 1
+                        else:
+                            break
+                            
+                    if self.active_reads:
+                        self.state = "READING"
+                
+                else:
+                    self.read_index = max(self.read_index, self.write_index + 1)
+                    while self.read_index < self.total_cells and self.linear_grid[self.read_index] in [COLOR_EMPTY, COLOR_SYSTEM]:
+                        self.read_index += 1
                         
-                if self.active_reads:
-                    self.state = "READING"
-                    return # Exit here so we don't run the gap-filling logic below
-                
-            # BRANCH B: GAP FILLING
-            # If the spot wasn't fragmented, it must be empty. Find data further down to pull into it.
-            self.read_index = max(self.read_index, self.write_index + 1)
-            while self.read_index < self.total_cells and self.linear_grid[self.read_index] in [COLOR_EMPTY, COLOR_SYSTEM]:
-                self.read_index += 1
-                
-            if self.read_index >= self.total_cells:
-                self.state = "DONE"
-                return
-
-            chunk_len = random.randint(1, 10)
-            self.active_reads = []
-            self.active_writes = []
-            
-            temp_read = self.read_index
-            temp_write = self.write_index
-            
-            for _ in range(chunk_len):
-                if temp_read < self.total_cells and temp_write < self.total_cells:
-                    if self.linear_grid[temp_read] not in [COLOR_EMPTY, COLOR_SYSTEM] and self.linear_grid[temp_write] == COLOR_EMPTY:
-                        self.active_reads.append(temp_read)
-                        self.active_writes.append(temp_write)
-                        temp_read += 1
-                        temp_write += 1
+                    if self.read_index >= self.total_cells:
+                        self.state = "DONE"
                     else:
-                        break 
+                        chunk_len = random.randint(1, 10)
+                        self.active_reads = []
+                        self.active_writes = []
                         
-            if self.active_reads:
-                self.state = "READING"
+                        temp_read = self.read_index
+                        temp_write = self.write_index
+                        
+                        for _ in range(chunk_len):
+                            if temp_read < self.total_cells and temp_write < self.total_cells:
+                                if self.linear_grid[temp_read] not in [COLOR_EMPTY, COLOR_SYSTEM] and self.linear_grid[temp_write] == COLOR_EMPTY:
+                                    self.active_reads.append(temp_read)
+                                    self.active_writes.append(temp_write)
+                                    temp_read += 1
+                                    temp_write += 1
+                                else:
+                                    break 
+                                    
+                        if self.active_reads:
+                            self.state = "READING"
 
         elif self.state == "READING":
             for idx in self.active_reads:
@@ -180,7 +191,6 @@ class DefragVisualizer:
             self.last_action_time = current_time 
 
         elif self.state == "WRITING":
-            # Modified to ensure we don't accidentally erase a block during an in-place heal
             for idx in self.active_reads:
                 if idx not in self.active_writes:
                     self.linear_grid[idx] = COLOR_EMPTY
@@ -200,6 +210,11 @@ class DefragVisualizer:
             
             self.state = "FIND_TARGETS"
             self.last_action_time = current_time
+            
+        # --- COMPLETION TRACKER ---
+        # If the machine transitioned into the DONE state during this exact step, log the timestamp
+        if prev_state != "DONE" and self.state == "DONE":
+            self.done_time = current_time
 
     def draw_text_center(self, text, rect, color):
         text_surface = self.font.render(text, True, color)
