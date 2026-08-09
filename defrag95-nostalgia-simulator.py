@@ -48,7 +48,7 @@ class DefragVisualizer:
         self.speed_text = str(self.delay_ms)
         self.input_speed_active = False
         
-        self.frag_percent = 20 
+        self.frag_percent = 25 
         self.frag_text = str(self.frag_percent)
         self.input_frag_active = False
         
@@ -154,7 +154,7 @@ class DefragVisualizer:
                 
                 # BRANCH B: GAP FILLING (Scatter-Gather Logic)
                 else:
-                    chunk_len = random.randint(2, 12)
+                    chunk_len = random.randint(2, 22)
                     self.active_reads = []
                     self.active_writes = []
                     
