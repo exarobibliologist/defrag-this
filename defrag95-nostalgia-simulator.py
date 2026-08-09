@@ -56,12 +56,11 @@ class DefragVisualizer:
         self.is_defragging = False
         self.state = "FIND_TARGETS"
         self.write_index = 0
-        self.read_index = 0
         self.last_action_time = 0
         
         # Screensaver State Variables
         self.done_time = 0
-        self.restart_delay_ms = 60000  # 60,000 milliseconds = 1 minute
+        self.restart_delay_ms = 60000 
         
         self.active_reads = []
         self.active_writes = []
@@ -80,9 +79,8 @@ class DefragVisualizer:
         self.is_defragging = False
         self.state = "FIND_TARGETS"
         self.write_index = 0
-        self.read_index = 0
         self.last_action_time = 0
-        self.done_time = 0  # Reset the completion timer
+        self.done_time = 0  
         self.active_reads = []
         self.active_writes = []
         
@@ -116,19 +114,16 @@ class DefragVisualizer:
 
         current_time = pygame.time.get_ticks()
 
-        # --- THE SCREENSAVER RESTART TRIGGER ---
+        # Screensaver Restart Trigger
         if self.state == "DONE":
-            # Check if our resting minute is up
             if current_time - self.done_time >= self.restart_delay_ms:
                 self.generate_seed()
-                self.is_defragging = True # Force it to immediately start running again
+                self.is_defragging = True 
             return
 
-        # Normal operation delay
         if current_time - self.last_action_time < self.delay_ms:
             return
 
-        # Record the state *before* we process logic so we can catch when it changes to DONE
         prev_state = self.state
 
         if self.state == "FIND_TARGETS":
@@ -139,6 +134,7 @@ class DefragVisualizer:
                 self.state = "DONE"
                 
             else:
+                # BRANCH A: IN-PLACE HEALING (For Fragmented Data)
                 if self.linear_grid[self.write_index] == COLOR_FRAGMENTED:
                     chunk_len = random.randint(1, 10)
                     self.active_reads = []
@@ -156,33 +152,57 @@ class DefragVisualizer:
                     if self.active_reads:
                         self.state = "READING"
                 
+                # BRANCH B: GAP FILLING (Scatter-Gather Logic)
                 else:
-                    self.read_index = max(self.read_index, self.write_index + 1)
-                    while self.read_index < self.total_cells and self.linear_grid[self.read_index] in [COLOR_EMPTY, COLOR_SYSTEM]:
-                        self.read_index += 1
+                    chunk_len = random.randint(2, 12)
+                    self.active_reads = []
+                    self.active_writes = []
+                    
+                    # 1. Map out the empty gap we want to fill
+                    temp_write = self.write_index
+                    for _ in range(chunk_len):
+                        if temp_write < self.total_cells and self.linear_grid[temp_write] == COLOR_EMPTY:
+                            self.active_writes.append(temp_write)
+                            temp_write += 1
+                        else:
+                            break
+                            
+                    actual_chunk_len = len(self.active_writes)
+                    
+                    if actual_chunk_len > 0:
+                        # 2. True Random Scatter Hunt: Search the entire remaining drive and sample randomly
+                        if random.random() < 0.8:
+                            # Map out every single fragmented block left on the drive
+                            available_fragments = [i for i in range(self.write_index + 1, self.total_cells) 
+                                                   if self.linear_grid[i] == COLOR_FRAGMENTED]
+                            
+                            # If there are any, pick them at random instead of sequentially
+                            if available_fragments:
+                                num_to_grab = min(actual_chunk_len, len(available_fragments))
+                                self.active_reads = random.sample(available_fragments, num_to_grab)
+                                self.active_reads.sort() # Sort indices so we process them cleanly
+                                
+                        # 3. Contiguous Fallback: If no red blocks found (or hit the 20% chance), pull next available data forward
+                        if not self.active_reads:
+                            temp_read = self.write_index + 1
+                            while temp_read < self.total_cells and self.linear_grid[temp_read] in [COLOR_EMPTY, COLOR_SYSTEM]:
+                                temp_read += 1
+                                
+                            if temp_read < self.total_cells:
+                                while temp_read < self.total_cells and len(self.active_reads) < actual_chunk_len:
+                                    if self.linear_grid[temp_read] not in [COLOR_EMPTY, COLOR_SYSTEM]:
+                                        self.active_reads.append(temp_read)
+                                        temp_read += 1
+                                    else:
+                                        break
+                                        
+                        # Trim writes to match exactly how many reads we successfully secured
+                        self.active_writes = self.active_writes[:len(self.active_reads)]
                         
-                    if self.read_index >= self.total_cells:
-                        self.state = "DONE"
-                    else:
-                        chunk_len = random.randint(1, 10)
-                        self.active_reads = []
-                        self.active_writes = []
-                        
-                        temp_read = self.read_index
-                        temp_write = self.write_index
-                        
-                        for _ in range(chunk_len):
-                            if temp_read < self.total_cells and temp_write < self.total_cells:
-                                if self.linear_grid[temp_read] not in [COLOR_EMPTY, COLOR_SYSTEM] and self.linear_grid[temp_write] == COLOR_EMPTY:
-                                    self.active_reads.append(temp_read)
-                                    self.active_writes.append(temp_write)
-                                    temp_read += 1
-                                    temp_write += 1
-                                else:
-                                    break 
-                                    
                         if self.active_reads:
                             self.state = "READING"
+                        else:
+                            self.state = "DONE" 
 
         elif self.state == "READING":
             for idx in self.active_reads:
@@ -205,14 +225,13 @@ class DefragVisualizer:
             for idx in self.active_writes:
                 self.linear_grid[idx] = COLOR_UNFRAGMENTED
             
+            # Only track the write_index going forward to prevent skipping bugs
             self.write_index = self.active_writes[-1] + 1
-            self.read_index = self.active_reads[-1] + 1
             
             self.state = "FIND_TARGETS"
             self.last_action_time = current_time
             
-        # --- COMPLETION TRACKER ---
-        # If the machine transitioned into the DONE state during this exact step, log the timestamp
+        # Completion Tracker
         if prev_state != "DONE" and self.state == "DONE":
             self.done_time = current_time
 
