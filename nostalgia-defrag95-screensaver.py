@@ -48,7 +48,7 @@ class DefragVisualizer:
         self.speed_text = str(self.delay_ms)
         self.input_speed_active = False
         
-        self.frag_percent = 25 
+        self.frag_percent = 20 
         self.frag_text = str(self.frag_percent)
         self.input_frag_active = False
         
@@ -84,6 +84,7 @@ class DefragVisualizer:
         self.active_reads = []
         self.active_writes = []
         
+        # 1. Base Generation
         while len(self.linear_grid) < self.total_cells:
             state_choice = random.choices(
                 [COLOR_EMPTY, COLOR_UNFRAGMENTED, COLOR_FRAGMENTED], 
@@ -100,13 +101,27 @@ class DefragVisualizer:
             
         self.linear_grid = self.linear_grid[:self.total_cells]
         
+        # 2. Protected Memory Clumping
+        # Target the last 25% of the drive to act as the "system zone"
+        system_zone_start = int(self.total_cells * 0.75)
+        num_system_clumps = random.randint(4, 10)
+        
+        for _ in range(num_system_clumps):
+            start_idx = random.randint(system_zone_start, self.total_cells - 1)
+            clump_size = random.randint(20, 80) # Large chunks for that classic look
+            
+            # Apply the clump to the grid, ensuring we don't overflow the array
+            for i in range(start_idx, min(start_idx + clump_size, self.total_cells)):
+                self.linear_grid[i] = COLOR_SYSTEM
+
+        # 3. Dynamic Chaos Pass
         chaos_chance = self.frag_percent / 100.0
         
         for i in range(self.total_cells):
-            if random.random() < chaos_chance: 
-                self.linear_grid[i] = random.choices([COLOR_FRAGMENTED, COLOR_EMPTY], weights=[80, 20])[0]
-            elif random.random() < 0.005:
-                self.linear_grid[i] = COLOR_SYSTEM
+            # Enforce protection: ONLY shred blocks that are not system files
+            if self.linear_grid[i] != COLOR_SYSTEM:
+                if random.random() < chaos_chance: 
+                    self.linear_grid[i] = random.choices([COLOR_FRAGMENTED, COLOR_EMPTY], weights=[80, 20])[0]
 
     def defrag_step(self):
         if not self.is_defragging:
@@ -114,7 +129,6 @@ class DefragVisualizer:
 
         current_time = pygame.time.get_ticks()
 
-        # Screensaver Restart Trigger
         if self.state == "DONE":
             if current_time - self.done_time >= self.restart_delay_ms:
                 self.generate_seed()
@@ -134,7 +148,6 @@ class DefragVisualizer:
                 self.state = "DONE"
                 
             else:
-                # BRANCH A: IN-PLACE HEALING (For Fragmented Data)
                 if self.linear_grid[self.write_index] == COLOR_FRAGMENTED:
                     chunk_len = random.randint(1, 10)
                     self.active_reads = []
@@ -152,13 +165,11 @@ class DefragVisualizer:
                     if self.active_reads:
                         self.state = "READING"
                 
-                # BRANCH B: GAP FILLING (Scatter-Gather Logic)
                 else:
-                    chunk_len = random.randint(2, 22)
+                    chunk_len = random.randint(2, 12)
                     self.active_reads = []
                     self.active_writes = []
                     
-                    # 1. Map out the empty gap we want to fill
                     temp_write = self.write_index
                     for _ in range(chunk_len):
                         if temp_write < self.total_cells and self.linear_grid[temp_write] == COLOR_EMPTY:
@@ -170,19 +181,15 @@ class DefragVisualizer:
                     actual_chunk_len = len(self.active_writes)
                     
                     if actual_chunk_len > 0:
-                        # 2. True Random Scatter Hunt: Search the entire remaining drive and sample randomly
                         if random.random() < 0.8:
-                            # Map out every single fragmented block left on the drive
                             available_fragments = [i for i in range(self.write_index + 1, self.total_cells) 
                                                    if self.linear_grid[i] == COLOR_FRAGMENTED]
                             
-                            # If there are any, pick them at random instead of sequentially
                             if available_fragments:
                                 num_to_grab = min(actual_chunk_len, len(available_fragments))
                                 self.active_reads = random.sample(available_fragments, num_to_grab)
-                                self.active_reads.sort() # Sort indices so we process them cleanly
+                                self.active_reads.sort() 
                                 
-                        # 3. Contiguous Fallback: If no red blocks found (or hit the 20% chance), pull next available data forward
                         if not self.active_reads:
                             temp_read = self.write_index + 1
                             while temp_read < self.total_cells and self.linear_grid[temp_read] in [COLOR_EMPTY, COLOR_SYSTEM]:
@@ -196,7 +203,6 @@ class DefragVisualizer:
                                     else:
                                         break
                                         
-                        # Trim writes to match exactly how many reads we successfully secured
                         self.active_writes = self.active_writes[:len(self.active_reads)]
                         
                         if self.active_reads:
@@ -225,13 +231,11 @@ class DefragVisualizer:
             for idx in self.active_writes:
                 self.linear_grid[idx] = COLOR_UNFRAGMENTED
             
-            # Only track the write_index going forward to prevent skipping bugs
             self.write_index = self.active_writes[-1] + 1
             
             self.state = "FIND_TARGETS"
             self.last_action_time = current_time
             
-        # Completion Tracker
         if prev_state != "DONE" and self.state == "DONE":
             self.done_time = current_time
 
